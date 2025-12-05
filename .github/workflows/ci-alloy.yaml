@@ -1,0 +1,148 @@
+name: CI Build Alloy
+on:
+  push:
+    branches: ['main']
+    paths-ignore:
+      - '.github/workflows/**'
+  schedule:
+    - cron: '0 0 7 * *'
+  workflow_dispatch:
+env:
+  REGISTRY: ghcr.io
+  BASE_IMAGE: alpine
+jobs:
+  prepare:
+    name: Parse ARGs
+    runs-on: ubuntu-slim
+    permissions:
+      contents: read
+    outputs:
+      os_nme: ${{ steps.parse.outputs.os_nme }}
+      os_ver: ${{ steps.parse.outputs.os_ver }}
+      pd_nme: ${{ steps.parse.outputs.pd_nme }}
+      pd_ver: ${{ steps.parse.outputs.pd_ver }}
+      go_ver: ${{ steps.parse.outputs.go_ver }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Parse ARGs from Repository
+        id: parse
+        shell: bash
+        run: |
+          if [ ! -f "Dockerfile" ]; then
+            echo "Error: No such file or directory"
+            exit 1
+          fi
+          OS_NME=$(grep -E '^FROM\sgolang:' Dockerfile | head -n 1 | sed 's/^FROM\sgolang:\(.*\)-\(.*\)\sAS\(.*\)/\2/' | sed 's/[^a-zA-Z]//g' | sed 's/^[[:space:]"]*//;s/[[:space:]"]*$//')
+          OS_VER=$(grep -E '^FROM\sgolang:' Dockerfile | head -n 1 | sed 's/^FROM\sgolang:\(.*\)-\(.*\)\sAS\(.*\)/\2/' | sed 's/[^0-9.]//g' | sed 's/^[[:space:]"]*//;s/[[:space:]"]*$//')
+          AF_NME=$(grep -E '^ARG\sPROJECT=' Dockerfile | head -n 1 | sed 's/^ARG\sPROJECT=\(.*\)/\1/' | sed 's/^[[:space:]"]*//;s/[[:space:]"]*$//')
+          AF_VER=$(grep -E '^ARG\sVERSION=' Dockerfile | tail -n 1 | sed 's/^ARG\sVERSION=\(.*\)/\1/' | sed 's/^[[:space:]"]*//;s/[[:space:]"]*$//')
+          # check if values are empty
+          if [ -z "$OS_NME" ] || [ -z "$OS_VER" ] || [ -z "$AF_NME" ] || [ -z "$AF_VER" ]; then
+            echo "Error: One or more ARG values are empty"
+            exit 1
+          fi
+          # check golang version
+          GO_VER=$(grep -E '^FROM\sgolang:' Dockerfile | head -n 1 |  sed 's/^FROM\sgolang:\(.*\)-\(.*\)AS\(.*\)/\1/' | sed 's/^[[:space:]"]*//;s/[[:space:]"]*$//')
+          # echo results
+          echo "Base OS: '${OS_NME}'-'${OS_VER}'"
+          echo "Artifacts: '${AF_NME}'-'${AF_VER}'"
+          echo "golang: '${GO_VER}'"
+          # set outputs
+          echo "os_nme=${OS_NME}" >> $GITHUB_OUTPUT
+          echo "os_ver=${OS_VER}" >> $GITHUB_OUTPUT
+          echo "pd_nme=${AF_NME}" >> $GITHUB_OUTPUT
+          echo "pd_ver=${AF_VER}" >> $GITHUB_OUTPUT
+          echo "go_ver=${GO_VER}" >> $GITHUB_OUTPUT
+  build:
+    name: Build and Push (${{ matrix.arch }})
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - arch: linux/amd64
+            runs-on: ubuntu-24.04
+          - arch: linux/arm64
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs-on }}
+    needs: prepare
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Normalize Architectures Tags
+        id: normalize
+        run: |
+          ARCH_TAG=$(echo "${{ matrix.arch }}" | xargs basename | tr -d '[:space:]')
+          echo "${ARCH_TAG}"
+          echo "arch_tag=${ARCH_TAG}" >> $GITHUB_OUTPUT
+      - name: Build and Push Image (${{ matrix.arch }})
+        uses: docker/build-push-action@v6
+        with:
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ needs.prepare.outputs.pd_nme }}:${{ steps.normalize.outputs.arch_tag }}
+  merge:
+    name: Create and Push Multi-Arch Manifest
+    runs-on: ubuntu-24.04
+    needs: 
+      - prepare
+      - build
+    permissions:
+      packages: write
+    steps:
+      - name: Login to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create and Push Manifest linux/amd64, linux/arm64
+        run: |
+          docker buildx imagetools create \
+            --tag ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ needs.prepare.outputs.pd_nme }}:${{ needs.prepare.outputs.pd_ver }}-${{ needs.prepare.outputs.os_nme }}${{ needs.prepare.outputs.os_ver }} \
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ needs.prepare.outputs.pd_nme }}:amd64 \
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ needs.prepare.outputs.pd_nme }}:arm64
+  cleanup:
+    name: Cleanup Obsoleting Tags
+    runs-on: ubuntu-slim
+    needs: 
+      - prepare
+      - build
+      - merge
+    permissions:
+      packages: write
+    steps:
+      - name: Delete Intermediate Tags
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          OWNER=${{ github.repository_owner }}
+          IMAGE=${{ needs.prepare.outputs.pd_nme }}
+          for TAG in amd64 arm64; do
+            VERSION_ID=$(gh api -H "Accept: application/vnd.github+json" \
+              /users/$OWNER/packages/container/$IMAGE/versions \
+              --jq ".[] | select(.metadata.container.tags[]? == \"$TAG\") | .id")
+            if [ -n "$VERSION_ID" ]; then
+              echo "Deleting $IMAGE:$TAG (version id $VERSION_ID)"
+              gh api \
+                --method DELETE \
+                -H "Accept: application/vnd.github+json" \
+                /users/$OWNER/packages/container/$IMAGE/versions/$VERSION_ID
+            fi
+          done
+      - name: Cleanup Untagged Images
+        uses: dataaxiom/ghcr-cleanup-action@v1
+        with:
+          delete-untagged: true
+          owner: ${{ github.repository_owner }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          package: ${{ needs.prepare.outputs.pd_nme }}
