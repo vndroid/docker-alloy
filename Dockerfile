@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.19.0
-FROM node:24-alpine3.21 AS ui-builder
+FROM node:24-alpine3.23 AS ui-builder
 
 ARG PROJECT=alloy
 ARG VERSION=1.12.2
@@ -21,7 +21,7 @@ RUN set -eux \
     && npm run build
 
 
-FROM golang:1.25-alpine3.21 AS go-builder
+FROM golang:1.25-alpine3.23 AS go-builder
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -50,7 +50,7 @@ RUN GOOS="$TARGETOS" GOARCH="$TARGETARCH" GOARM=${TARGETVARIANT#v} \
     GO_TAGS="netgo builtinassets promtail_journal_enabled" \
     make alloy
 
-FROM alpine:3.21
+FROM alpine:3.23
 
 ARG UID="473"
 ARG USERNAME="alloy"
