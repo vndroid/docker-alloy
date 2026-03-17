@@ -4,14 +4,20 @@ FROM node:24-alpine3.21 AS ui-builder
 ARG PROJECT=alloy
 ARG VERSION=1.12.0
 
+RUN set -eux \
+    && apk add --no-cache git \
+    && addgroup -g 1001 gorelease \
+    && adduser -D -u 1001 -G gorelease gorelease
+
+USER 1001:1001
+
 WORKDIR /ui
 
 RUN set -eux \
-    && apk add --no-cache git \
     && git clone -b v${VERSION} --single-branch --depth=1 https://github.com/grafana/alloy.git \
     && cp -a alloy/internal/web/ui/* /ui \
-    && rm -rf alloy
-RUN --mount=type=cache,target=/ui/node_modules,sharing=locked npm install \
+    && rm -rf alloy \
+    && npm install \
     && npm run build
 
 
@@ -21,24 +27,27 @@ ARG TARGETOS
 ARG TARGETARCH
 ARG TARGETVARIANT
 ARG RELEASE_BUILD=1
-ARG GOEXPERIMENT
 
 ARG VERSION=1.12.0
 
-WORKDIR /src/alloy
-
 RUN set -eux \
     && apk add --no-cache binutils-gold bash gcc g++ make git binutils elogind-dev \
-    && git clone -b v${VERSION} --single-branch --depth=1 https://github.com/grafana/alloy.git .
+    && addgroup -g 1001 gorelease \
+    && adduser -D -u 1001 -G gorelease gorelease
 
-COPY --from=ui-builder /ui/dist /src/alloy/internal/web/ui/dist
+USER 1001:1001
 
-RUN --mount=type=cache,target=/root/.cache/go-build \
-    --mount=type=cache,target=/go/pkg/mod \
-    GOOS="$TARGETOS" GOARCH="$TARGETARCH" GOARM=${TARGETVARIANT#v} \
+WORKDIR /go/src/github.com/grafana/alloy
+
+RUN set -eux \
+    && git clone -b v${VERSION} --single-branch --depth=1 https://github.com/grafana/alloy.git . \
+    && sed -i 's#BuildUser=$(shell whoami)@$(shell hostname)#BuildUser=$(shell whoami)#' Makefile
+
+COPY --from=ui-builder /ui/dist /go/src/github.com/grafana/alloy/internal/web/ui/dist
+
+RUN GOOS="$TARGETOS" GOARCH="$TARGETARCH" GOARM=${TARGETVARIANT#v} \
     RELEASE_BUILD=${RELEASE_BUILD} VERSION=${VERSION} \
     GO_TAGS="netgo builtinassets promtail_journal_enabled" \
-    GOEXPERIMENT=${GOEXPERIMENT} \
     make alloy
 
 FROM alpine:3.21
@@ -48,10 +57,10 @@ ARG USERNAME="alloy"
 
 LABEL org.opencontainers.image.source="https://github.com/grafana/alloy"
 
-RUN apk add --no-cache ca-certificates curl tzdata musl-utils
+RUN apk add --no-cache ca-certificates tzdata musl-utils
 
-COPY --from=go-builder --chown=${UID}:${UID} /src/alloy/build/alloy /usr/local/bin/
-COPY --from=go-builder --chown=${UID}:${UID} /src/alloy/example-config.alloy /etc/alloy/config.alloy
+COPY --from=go-builder --chown=${UID}:${UID} /go/src/github.com/grafana/alloy/build/alloy /usr/local/bin/
+COPY --from=go-builder --chown=${UID}:${UID} /go/src/github.com/grafana/alloy/example-config.alloy /etc/alloy/config.alloy
 COPY docker-entrypoint.sh /usr/local/bin/
 
 RUN set -x \
