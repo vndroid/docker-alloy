@@ -2,7 +2,7 @@
 FROM node:24-alpine3.23 AS ui-builder
 
 ARG PROJECT=alloy
-ARG VERSION=1.12.2
+ARG VERSION=1.13.0
 
 RUN set -eux \
     && apk add --no-cache git \
@@ -28,7 +28,7 @@ ARG TARGETARCH
 ARG TARGETVARIANT
 ARG RELEASE_BUILD=1
 
-ARG VERSION=1.12.2
+ARG VERSION=1.13.0
 
 RUN set -eux \
     && apk add --no-cache binutils-gold bash gcc g++ make git binutils elogind-dev \
