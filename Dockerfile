@@ -1,8 +1,8 @@
-# syntax=docker/dockerfile:1.19.0
+# syntax=docker/dockerfile:1.21.0
 FROM node:24-alpine3.23 AS ui-builder
 
 ARG PROJECT=alloy
-ARG VERSION=1.13.2
+ARG VERSION=1.14.0
 
 RUN set -eux \
     && apk add --no-cache git \
@@ -28,7 +28,8 @@ ARG TARGETARCH
 ARG TARGETVARIANT
 ARG RELEASE_BUILD=1
 
-ARG VERSION=1.13.2
+ARG VERSION=1.14.0
+ARG GOEXPERIMENT
 
 RUN set -eux \
     && apk add --no-cache binutils-gold bash gcc g++ make git binutils elogind-dev \
@@ -47,7 +48,9 @@ COPY --from=ui-builder /ui/dist /go/src/github.com/grafana/alloy/internal/web/ui
 
 RUN GOOS="$TARGETOS" GOARCH="$TARGETARCH" GOARM=${TARGETVARIANT#v} \
     RELEASE_BUILD=${RELEASE_BUILD} VERSION=${VERSION} \
-    GO_TAGS="netgo builtinassets promtail_journal_enabled" \
+    GO_TAGS="netgo embedalloyui promtail_journal_enabled" \
+    GOEXPERIMENT=${GOEXPERIMENT} \
+    SKIP_UI_BUILD=1 \
     make alloy
 
 FROM alpine:3.23
@@ -61,6 +64,7 @@ RUN apk add --no-cache ca-certificates tzdata musl-utils
 
 COPY --from=go-builder --chown=${UID}:${UID} /go/src/github.com/grafana/alloy/build/alloy /usr/local/bin/
 COPY --from=go-builder --chown=${UID}:${UID} /go/src/github.com/grafana/alloy/example-config.alloy /etc/alloy/config.alloy
+COPY --from=go-builder --chown=${UID}:${UID} /go/src/github.com/grafana/alloy/packaging/docker/otelcol.sh /bin/otelcol
 COPY docker-entrypoint.sh /usr/local/bin/
 
 RUN set -x \
@@ -68,7 +72,8 @@ RUN set -x \
     && adduser -S -u $UID -G $USERNAME $USERNAME \
     && mkdir -p /var/lib/alloy/data \
     && chown -R $USERNAME:$USERNAME /var/lib/alloy \
-    && chmod -R 770 /var/lib/alloy
+    && chmod -R 770 /var/lib/alloy \
+    && chmod 755 /bin/otelcol
 
 ENTRYPOINT ["docker-entrypoint.sh"]
 ENV ALLOY_DEPLOY_MODE=docker
