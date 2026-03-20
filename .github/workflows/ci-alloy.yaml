@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 env:
   REGISTRY: ghcr.io
-  BASE_IMAGE: alpine
+  ARTIFACTS: alloy
 jobs:
   prepare:
     name: Parse ARGs
@@ -19,39 +19,37 @@ jobs:
     outputs:
       os_nme: ${{ steps.parse.outputs.os_nme }}
       os_ver: ${{ steps.parse.outputs.os_ver }}
-      pd_nme: ${{ steps.parse.outputs.pd_nme }}
       pd_ver: ${{ steps.parse.outputs.pd_ver }}
       go_ver: ${{ steps.parse.outputs.go_ver }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
       - name: Parse ARGs from Repository
         id: parse
         shell: bash
         run: |
+          command -v bash || exit 1;
           if [ ! -f "Dockerfile" ]; then
             echo "Error: No such file or directory"
             exit 1
           fi
-          OS_NME=$(grep -E '^FROM\sgolang:' Dockerfile | head -n 1 | sed 's/^FROM\sgolang:\(.*\)-\(.*\)\sAS\(.*\)/\2/' | sed 's/[^a-zA-Z]//g' | sed 's/^[[:space:]"]*//;s/[[:space:]"]*$//')
-          OS_VER=$(grep -E '^FROM\sgolang:' Dockerfile | head -n 1 | sed 's/^FROM\sgolang:\(.*\)-\(.*\)\sAS\(.*\)/\2/' | sed 's/[^0-9.]//g' | sed 's/^[[:space:]"]*//;s/[[:space:]"]*$//')
-          AF_NME=$(grep -E '^ARG\sPROJECT=' Dockerfile | head -n 1 | sed 's/^ARG\sPROJECT=\(.*\)/\1/' | sed 's/^[[:space:]"]*//;s/[[:space:]"]*$//')
-          AF_VER=$(grep -E '^ARG\sVERSION=' Dockerfile | tail -n 1 | sed 's/^ARG\sVERSION=\(.*\)/\1/' | sed 's/^[[:space:]"]*//;s/[[:space:]"]*$//')
+          OS_NME=$(grep -E '^FROM' Dockerfile | grep -Ev 'AS' | head -n 1 | sed 's/^FROM[[:space:]]\(.*\):\(.*\)$/\1/' | sed 's/[^a-zA-Z]//g')
+          OS_VER=$(grep -E '^FROM' Dockerfile | grep -Ev 'AS' | head -n 1 | sed 's/^FROM[[:space:]]\(.*\):\(.*\)$/\2/' | sed 's/[^0-9.]//g')
+          AF_VER=$(grep -E '^ARG[[:space:]]VERSION' Dockerfile | tail -n 1 | sed 's/^ARG[[:space:]]VERSION=\(.*\)$/\1/' | sed 's/[^0-9.]//g')
           # check if values are empty
-          if [ -z "$OS_NME" ] || [ -z "$OS_VER" ] || [ -z "$AF_NME" ] || [ -z "$AF_VER" ]; then
+          if [ -z "$OS_NME" ] || [ -z "$OS_VER" ] || [ -z "$AF_VER" ]; then
             echo "Error: One or more ARG values are empty"
             exit 1
           fi
           # check golang version
-          GO_VER=$(grep -E '^FROM\sgolang:' Dockerfile | head -n 1 |  sed 's/^FROM\sgolang:\(.*\)-\(.*\)AS\(.*\)/\1/' | sed 's/^[[:space:]"]*//;s/[[:space:]"]*$//')
+          GO_VER=$(grep -E '^FROM' Dockerfile | grep -Ei 'go' | head -n 1 | sed 's/^FROM[[:space:]]\(.*\):\(.*\)-\(.*\)[[:space:]]AS\(.*\)/\2/' | sed 's/[^0-9.]//g')
           # echo results
-          echo "Base OS: '${OS_NME}'-'${OS_VER}'"
-          echo "Artifacts: '${AF_NME}'-'${AF_VER}'"
-          echo "golang: '${GO_VER}'"
+          echo "OS: '${OS_NME}'-'${OS_VER}'"
+          echo "GO: '${GO_VER}'"
+          echo "'v${AF_VER}'"
           # set outputs
           echo "os_nme=${OS_NME}" >> $GITHUB_OUTPUT
           echo "os_ver=${OS_VER}" >> $GITHUB_OUTPUT
-          echo "pd_nme=${AF_NME}" >> $GITHUB_OUTPUT
           echo "pd_ver=${AF_VER}" >> $GITHUB_OUTPUT
           echo "go_ver=${GO_VER}" >> $GITHUB_OUTPUT
   build:
@@ -70,11 +68,11 @@ jobs:
     needs: prepare
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
       - name: Login to ghcr.io
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.repository_owner }}
@@ -86,10 +84,10 @@ jobs:
           echo "${ARCH_TAG}"
           echo "arch_tag=${ARCH_TAG}" >> $GITHUB_OUTPUT
       - name: Build and Push Image (${{ matrix.arch }})
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           push: true
-          tags: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ needs.prepare.outputs.pd_nme }}:${{ steps.normalize.outputs.arch_tag }}
+          tags: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.ARTIFACTS }}:${{ steps.normalize.outputs.arch_tag }}
   merge:
     name: Create and Push Multi-Arch Manifest
     runs-on: ubuntu-24.04
@@ -100,7 +98,7 @@ jobs:
       packages: write
     steps:
       - name: Login to ghcr.io
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.repository_owner }}
@@ -108,9 +106,9 @@ jobs:
       - name: Create and Push Manifest linux/amd64, linux/arm64
         run: |
           docker buildx imagetools create \
-            --tag ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ needs.prepare.outputs.pd_nme }}:${{ needs.prepare.outputs.pd_ver }}-${{ needs.prepare.outputs.os_nme }}${{ needs.prepare.outputs.os_ver }} \
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ needs.prepare.outputs.pd_nme }}:amd64 \
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ needs.prepare.outputs.pd_nme }}:arm64
+            --tag ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.ARTIFACTS }}:${{ needs.prepare.outputs.pd_ver }}-${{ needs.prepare.outputs.os_nme }}${{ needs.prepare.outputs.os_ver }} \
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.ARTIFACTS }}:amd64 \
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.ARTIFACTS }}:arm64
   cleanup:
     name: Cleanup Obsoleting Tags
     runs-on: ubuntu-slim
@@ -126,7 +124,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           OWNER=${{ github.repository_owner }}
-          IMAGE=${{ needs.prepare.outputs.pd_nme }}
+          IMAGE=${{ env.ARTIFACTS }}
           for TAG in amd64 arm64; do
             VERSION_ID=$(gh api -H "Accept: application/vnd.github+json" \
               /users/$OWNER/packages/container/$IMAGE/versions \
@@ -145,4 +143,4 @@ jobs:
           delete-untagged: true
           owner: ${{ github.repository_owner }}
           token: ${{ secrets.GITHUB_TOKEN }}
-          package: ${{ needs.prepare.outputs.pd_nme }}
+          package: ${{ env.ARTIFACTS }}

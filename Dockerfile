@@ -1,7 +1,6 @@
 # syntax=docker/dockerfile:1.21.0
 FROM node:24-alpine3.23 AS ui-builder
 
-ARG PROJECT=alloy
 ARG VERSION=1.14.1
 
 RUN set -eux \
