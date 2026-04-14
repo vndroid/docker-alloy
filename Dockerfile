@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.21.0
 FROM node:24-alpine3.23 AS ui-builder
 
-ARG VERSION=1.15.0
+ARG VERSION=1.15.1
 
 RUN set -eux \
     && apk add --no-cache git \
@@ -27,7 +27,7 @@ ARG TARGETARCH
 ARG TARGETVARIANT
 ARG RELEASE_BUILD=1
 
-ARG VERSION=1.15.0
+ARG VERSION=1.15.1
 ARG GOEXPERIMENT
 
 RUN set -eux \
