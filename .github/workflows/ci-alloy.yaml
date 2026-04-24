@@ -17,10 +17,10 @@ jobs:
     permissions:
       contents: read
     outputs:
-      os_nme: ${{ steps.parse.outputs.os_nme }}
-      os_ver: ${{ steps.parse.outputs.os_ver }}
-      pd_ver: ${{ steps.parse.outputs.pd_ver }}
-      go_ver: ${{ steps.parse.outputs.go_ver }}
+      os_name: ${{ steps.parse.outputs.os_name }}
+      os_vers: ${{ steps.parse.outputs.os_vers }}
+      au_vers: ${{ steps.parse.outputs.au_vers }}
+      go_vers: ${{ steps.parse.outputs.go_vers }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -33,25 +33,25 @@ jobs:
             echo "Error: No such file or directory"
             exit 1
           fi
-          OS_NME=$(grep -E '^FROM' Dockerfile | grep -Ev 'AS' | head -n 1 | sed 's/^FROM[[:space:]]\(.*\):\(.*\)$/\1/' | sed 's/[^a-zA-Z]//g')
-          OS_VER=$(grep -E '^FROM' Dockerfile | grep -Ev 'AS' | head -n 1 | sed 's/^FROM[[:space:]]\(.*\):\(.*\)$/\2/' | sed 's/[^0-9.]//g')
-          AF_VER=$(grep -E '^ARG[[:space:]]VERSION' Dockerfile | tail -n 1 | sed 's/^ARG[[:space:]]VERSION=\(.*\)$/\1/' | sed 's/[^0-9.]//g')
+          OS_NAME=$(grep -E '^FROM' Dockerfile | grep -Ev 'AS' | head -n 1 | sed 's/^FROM[[:space:]]\(.*\):\(.*\)$/\1/' | sed 's/[^a-zA-Z]//g')
+          OS_VERS=$(grep -E '^FROM' Dockerfile | grep -Ev 'AS' | head -n 1 | sed 's/^FROM[[:space:]]\(.*\):\(.*\)$/\2/' | sed 's/[^0-9.]//g')
+          AF_VERS=$(grep -E '^ARG[[:space:]]VERSION' Dockerfile | tail -n 1 | sed 's/^ARG[[:space:]]VERSION=\(.*\)$/\1/' | sed 's/[^0-9.]//g')
           # check if values are empty
-          if [ -z "$OS_NME" ] || [ -z "$OS_VER" ] || [ -z "$AF_VER" ]; then
+          if [ -z "$OS_NAME" ] || [ -z "$OS_VERS" ] || [ -z "$AF_VERS" ]; then
             echo "Error: One or more ARG values are empty"
             exit 1
           fi
           # check golang version
-          GO_VER=$(grep -E '^FROM' Dockerfile | grep -Ei 'go' | head -n 1 | sed 's/^FROM[[:space:]]\(.*\):\(.*\)-\(.*\)[[:space:]]AS\(.*\)/\2/' | sed 's/[^0-9.]//g')
+          GO_VERS=$(grep -E '^FROM' Dockerfile | grep -Ei 'go' | head -n 1 | sed 's/^FROM[[:space:]]\(.*\):\(.*\)-\(.*\)[[:space:]]AS\(.*\)/\2/' | sed 's/[^0-9.]//g')
           # echo results
-          echo "OS: '${OS_NME}'-'${OS_VER}'"
-          echo "GO: '${GO_VER}'"
-          echo "'v${AF_VER}'"
+          echo "OS: '${OS_NAME}'-'${OS_VERS}'"
+          echo "GO: '${GO_VERS}'"
+          echo "'v${AF_VERS}'"
           # set outputs
-          echo "os_nme=${OS_NME}" >> $GITHUB_OUTPUT
-          echo "os_ver=${OS_VER}" >> $GITHUB_OUTPUT
-          echo "pd_ver=${AF_VER}" >> $GITHUB_OUTPUT
-          echo "go_ver=${GO_VER}" >> $GITHUB_OUTPUT
+          echo "os_name=${OS_NAME}" >> $GITHUB_OUTPUT
+          echo "os_vers=${OS_VERS}" >> $GITHUB_OUTPUT
+          echo "au_vers=${AF_VERS}" >> $GITHUB_OUTPUT
+          echo "go_vers=${GO_VERS}" >> $GITHUB_OUTPUT
   build:
     name: Build and Push (${{ matrix.arch }})
     permissions:
@@ -88,6 +88,8 @@ jobs:
         with:
           push: true
           tags: ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.ARTIFACTS }}:${{ steps.normalize.outputs.arch_tag }}
+          cache-from: type=gha,scope=${{ env.ARTIFACTS }}-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ env.ARTIFACTS }}-${{ matrix.arch }}
   merge:
     name: Create and Push Multi-Arch Manifest
     runs-on: ubuntu-24.04
@@ -106,7 +108,7 @@ jobs:
       - name: Create and Push Manifest linux/amd64, linux/arm64
         run: |
           docker buildx imagetools create \
-            --tag ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.ARTIFACTS }}:${{ needs.prepare.outputs.pd_ver }}-${{ needs.prepare.outputs.os_nme }}${{ needs.prepare.outputs.os_ver }} \
+            --tag ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.ARTIFACTS }}:${{ needs.prepare.outputs.au_vers }}-${{ needs.prepare.outputs.os_name }}${{ needs.prepare.outputs.os_vers }} \
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.ARTIFACTS }}:amd64 \
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ env.ARTIFACTS }}:arm64
   cleanup:
