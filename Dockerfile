@@ -1,7 +1,7 @@
-# syntax=docker/dockerfile:1.21.0
+# syntax=docker/dockerfile:1.23.0
 FROM node:24-alpine3.23 AS ui-builder
 
-ARG VERSION=1.15.1
+ARG VERSION=1.16.0
 
 RUN set -eux \
     && apk add --no-cache git \
@@ -20,14 +20,14 @@ RUN set -eux \
     && npm run build
 
 
-FROM golang:1.25-alpine3.23 AS go-builder
+FROM golang:1.26-alpine3.23 AS go-builder
 
 ARG TARGETOS
 ARG TARGETARCH
 ARG TARGETVARIANT
 ARG RELEASE_BUILD=1
 
-ARG VERSION=1.15.1
+ARG VERSION=1.16.0
 ARG GOEXPERIMENT
 
 RUN set -eux \
