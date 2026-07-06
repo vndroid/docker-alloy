@@ -1,6 +1,6 @@
 FROM node:24-alpine3.23 AS ui-builder
 
-ARG VERSION=1.16.3
+ARG VERSION=1.17.0
 
 RUN set -eux \
     && apk add --no-cache git \
@@ -26,7 +26,7 @@ ARG TARGETARCH
 ARG TARGETVARIANT
 ARG RELEASE_BUILD=1
 
-ARG VERSION=1.16.3
+ARG VERSION=1.17.0
 ARG GOEXPERIMENT
 
 RUN set -eux \
