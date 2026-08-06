@@ -45,8 +45,8 @@ jobs:
           GO_VERS=$(grep -E '^FROM' Dockerfile | grep -Ei 'go' | head -n 1 | sed 's/^FROM[[:space:]]\(.*\):\(.*\)-\(.*\)[[:space:]]AS\(.*\)/\2/' | sed 's/[^0-9.]//g')
           # echo results
           echo "OS: '${OS_NAME}'-'${OS_VERS}'"
-          echo "GO: '${GO_VERS}'"
-          echo "'v${AF_VERS}'"
+          echo "GO: 'v${GO_VERS}'"
+          echo "AU: 'v${AF_VERS}'"
           # set outputs
           echo "os_name=${OS_NAME}" >> $GITHUB_OUTPUT
           echo "os_vers=${OS_VERS}" >> $GITHUB_OUTPUT
